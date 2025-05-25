@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quản lý Lịch sử Mua Hàng - V4</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment-timezone/0.5.34/moment-timezone-with-data.min.js"></script>
+
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .table-container {
+            max-height: 50vh; 
+            overflow-y: auto; overflow-x: auto;
+        }
+        .table-container::-webkit-scrollbar { width: 8px; height: 8px; }
+        .table-container::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 10px; }
+        .table-container::-webkit-scrollbar-thumb { background: #888; border-radius: 10px; }
+        .table-container::-webkit-scrollbar-thumb:hover { background: #555; }
+        .loader {
+            border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%;
+            width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 10px auto;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        .sortable-header { cursor: pointer; position: relative; }
+        .sortable-header .sort-icon-space { padding-right: 18px; display: inline-block; }
+        .sortable-header::after, .sortable-header::before {
+            content: ""; position: absolute; right: 4px;
+            border-left: 5px solid transparent; border-right: 5px solid transparent;
+        }
+        .sortable-header::before { bottom: calc(50% + 1px); border-bottom: 5px solid #ccc; }
+        .sortable-header::after { top: calc(50% + 1px); border-top: 5px solid #ccc; }
+        .sortable-header.asc::before { border-bottom-color: #3498db; }
+        .sortable-header.desc::after { border-top-color: #3498db; }
+
+        #resultsTable th, #resultsTable td {
+            padding-left: 0.5rem; padding-right: 0.5rem;
+            padding-top: 0.75rem; padding-bottom: 0.75rem;
+        }
+        @media (min-width: 640px) { 
+            #resultsTable th, #resultsTable td { padding-left: 1rem; padding-right: 1rem; }
+        }
+        #resultsTable tbody tr:nth-child(even) { background-color: #f9fafb; }
+        #resultsTable tbody tr:hover { background-color: #f3f4f6; }
+
+        #toastContainer {
+            position: fixed; bottom: 20px; right: 20px; z-index: 1000;
+            display: flex; flex-direction: column-reverse; gap: 10px;
+        }
+        .toast {
+            padding: 12px 18px; border-radius: 6px; color: white;
+            font-size: 0.875rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            opacity: 0; transform: translateY(20px);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+        .toast.show { opacity: 1; transform: translateY(0); }
+        .toast.info { background-color: #3b82f6; }
+        .toast.success { background-color: #10b981; }
+        .toast.error { background-color: #ef4444; }
+        .toast.warning { background-color: #f59e0b; }
+
+        #paginationControls button {
+            padding: 6px 12px; margin: 0 4px; border: 1px solid #d1d5db; 
+            background-color: white; border-radius: 4px; transition: background-color 0.2s;
+        }
+        #paginationControls button:hover:not(:disabled) { background-color: #f3f4f6; }
+        #paginationControls button:disabled { opacity: 0.5; cursor: not-allowed; }
+        #paginationControls span { margin: 0 8px; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col items-center p-2 xs:p-4 text-sm sm:text-base">
+
+    <div class="bg-white p-3 sm:p-4 md:p-6 rounded-xl shadow-2xl w-full max-w-5xl">
+        <header class="mb-4 text-center">
+            <h1 class="text-xl sm:text-2xl md:text-3xl font-bold text-gray-800">Quản lý Lịch sử Mua Hàng</h1>
+            <p class="text-gray-600 mt-1 text-xs sm:text-sm">Tải CSV, tìm kiếm, lọc, sắp xếp & xuất dữ liệu.</p>
+        </header>
+
+        <main>
+            <section class="mb-4 p-3 sm:p-4 bg-indigo-50 rounded-lg shadow">
+                <div id="fileUploadContainer">
+                    <label for="csvFile" class="block text-xs sm:text-sm font-medium text-gray-700 mb-1">1. Tải lên (các) tệp CSV:</label>
+                    <input type="file" id="csvFile" accept=".csv" multiple class="block w-full text-xs sm:text-sm text-gray-500
+                        file:mr-2 file:sm:mr-4 file:py-2 file:px-3 file:sm:px-4 file:rounded-lg file:border-0 file:text-xs file:sm:text-sm file:font-semibold
+                        file:bg-indigo-100 file:text-indigo-700 hover:file:bg-indigo-200 transition cursor-pointer shadow-sm"/>
+                </div>
+                <button id="changeFileButton" class="mt-2 w-full sm:w-auto bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-3 sm:px-4 rounded-lg shadow focus:outline-none focus:ring-2 focus:ring-yellow-400 hidden text-xs sm:text-sm">
+                    Tải tệp CSV khác / Xóa dữ liệu
+                </button>
+                <p id="fileStatus" class="text-xs text-gray-500 mt-1"></p>
+                 <div id="processingProgress" class="mt-2 text-xs text-blue-600"></div>
+            </section>
+
+            <section class="mb-4 p-3 sm:p-4 bg-gray-50 rounded-lg shadow">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 items-end">
+                    <div>
+                        <label for="phoneNumber" class="block text-xs sm:text-sm font-medium text-gray-700 mb-1">2. SĐT Khách Hàng:</label>
+                        <input type="tel" id="phoneNumber" placeholder="Tìm theo SĐT" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-xs sm:text-sm">
+                    </div>
+                    <div>
+                        <label for="startDate" class="block text-xs sm:text-sm font-medium text-gray-700 mb-1">Từ ngày:</label>
+                        <input type="date" id="startDate" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-xs sm:text-sm">
+                    </div>
+                    <div>
+                        <label for="endDate" class="block text-xs sm:text-sm font-medium text-gray-700 mb-1">Đến ngày:</label>
+                        <input type="date" id="endDate" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-xs sm:text-sm">
+                    </div>
+                </div>
+                <div class="mt-4 flex flex-col sm:flex-row gap-2">
+                    <button id="searchButton" class="w-full sm:flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg shadow focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-xs sm:text-sm">
+                        Áp dụng Tìm kiếm & Lọc
+                    </button>
+                    <button id="resetButton" class="w-full sm:flex-1 bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg shadow focus:outline-none focus:ring-2 focus:ring-gray-400 text-xs sm:text-sm">
+                        Đặt lại bộ lọc
+                    </button>
+                </div>
+            </section>
+
+            <section id="summarySection" class="my-4 p-3 bg-green-50 rounded-lg shadow hidden">
+                 <h3 class="text-sm sm:text-md font-semibold text-green-800 mb-1">Tóm tắt cho khách hàng (dựa trên kết quả lọc):</h3>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs sm:text-sm">
+                    <p>Tổng số đơn hàng: <strong id="totalOrders" class="text-green-700">0</strong></p>
+                    <p>Tổng thành tiền: <strong id="totalAmount" class="text-green-700">0 VNĐ</strong></p>
+                </div>
+            </section>
+            
+            <section id="resultsSection" class="mt-2">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-2 gap-2">
+                    <h2 class="text-lg sm:text-xl font-semibold text-gray-700">Kết Quả</h2>
+                    <button id="exportCsvButton" class="w-full sm:w-auto bg-green-500 hover:bg-green-600 text-white font-bold py-1 px-3 rounded-lg shadow text-xs focus:outline-none focus:ring-2 focus:ring-green-400 hidden">
+                        Xuất CSV (Trang này)
+                    </button>
+                </div>
+                <div id="loadingIndicator" class="loader hidden"></div>
+                <div id="messageArea" class="text-center text-gray-600 my-2 text-xs sm:text-sm"></div> 
+                <div class="table-container rounded-lg shadow-md bg-white">
+                    <table id="resultsTable" class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50 sticky top-0 z-10">
+                            <tr>
+                                <th scope="col" class="text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" data-sort-key="TIME"><span class="sort-icon-space">Thời gian</span></th>
+                                <th scope="col" class="text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Người bán</th>
+                                <th scope="col" class="text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Kênh bán</th>
+                                <th scope="col" class="text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tên sản phẩm</th>
+                                <th scope="col" class="text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" data-sort-key="AMOUNT_RAW"><span class="sort-icon-space">Thành tiền</span></th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200 text-xs sm:text-sm">
+                        </tbody>
+                    </table>
+                </div>
+                <div id="paginationControls" class="mt-4 flex justify-center items-center text-xs sm:text-sm hidden">
+                    <button id="prevPageButton">&laquo; Trước</button>
+                    <span id="pageInfo">Trang 1 / 1</span>
+                    <button id="nextPageButton">Sau &raquo;</button>
+                    <select id="rowsPerPageSelect" class="ml-4 p-1 border border-gray-300 rounded-md text-xs">
+                        <option value="10">10 dòng</option>
+                        <option value="25" selected>25 dòng</option>
+                        <option value="50">50 dòng</option>
+                        <option value="100">100 dòng</option>
+                    </select>
+                </div>
+            </section>
+        </main>
+
+        <footer class="mt-6 text-center text-xs text-gray-500">
+            <p>&copy; <span id="currentYear"></span> - Công cụ Quản lý Lịch sử Mua Hàng. Thiết kế bởi: Thịnh Nguyễn.</p>
+        </footer>
+    </div>
+
+    <div id="toastContainer"></div>
+
+    <script>
+        document.getElementById('currentYear').textContent = new Date().getFullYear();
+        moment.tz.setDefault("Asia/Ho_Chi_Minh");
+
+        let originalData = []; 
+        let displayedData = []; 
+        let columnIndices = {}; 
+        let currentSort = { key: null, direction: 'asc' };
+        let currentPage = 1;
+        let rowsPerPage = 25; 
+
+        const LS_DATA_KEY = 'csvManagerData_v2_fixed'; 
+        const LS_FILENAME_KEY = 'csvManagerFileName_v2_fixed';
+        const LS_COL_INDICES_KEY = 'csvManagerColumnIndices_v2_fixed';
+
+        const COLUMN_MAPPINGS = {
+            PHONE: ["điện thoại", "sđt", "so dien thoai", "sdt khách hàng"],
+            TIME: ["thời gian", "ngày mua", "ngày giao dịch", "ngày tạo", "ngày đặt hàng", "ngày giao"],
+            SALESPERSON: ["tên người bán", "người bán", "nvbh", "nhân viên bán hàng", "người tạo đơn"],
+            CHANNEL: ["kênh bán", "kênh bán hàng", "platform", "nguồn"],
+            PRODUCT: ["tên sản phẩm", "sản phẩm", "tên hàng", "mặt hàng", "dịch vụ"],
+            AMOUNT: ["thành tiền", "tổng tiền", "giá trị", "doanh thu", "tổng cộng"]
+        };
+
+        const csvFileInput = document.getElementById('csvFile');
+        const fileUploadContainer = document.getElementById('fileUploadContainer');
+        const changeFileButton = document.getElementById('changeFileButton');
+        const phoneNumberInput = document.getElementById('phoneNumber');
+        const startDateInput = document.getElementById('startDate');
+        const endDateInput = document.getElementById('endDate');
+        const searchButton = document.getElementById('searchButton');
+        const resetButton = document.getElementById('resetButton');
+        const exportCsvButton = document.getElementById('exportCsvButton');
+        const resultsTableBody = document.querySelector('#resultsTable tbody');
+        const fileStatus = document.getElementById('fileStatus');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const processingProgress = document.getElementById('processingProgress');
+        const summarySection = document.getElementById('summarySection');
+        const totalOrdersEl = document.getElementById('totalOrders');
+        const totalAmountEl = document.getElementById('totalAmount');
+        const paginationControls = document.getElementById('paginationControls');
+        const prevPageButton = document.getElementById('prevPageButton');
+        const nextPageButton = document.getElementById('nextPageButton');
+        const pageInfo = document.getElementById('pageInfo');
+        const rowsPerPageSelect = document.getElementById('rowsPerPageSelect');
+        const messageArea = document.getElementById('messageArea');
+
+
+        searchButton.disabled = true;
+
+        const toastContainer = document.getElementById('toastContainer');
+        function showToast(message, type = 'info', duration = 3000) {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            toastContainer.prepend(toast);
+            requestAnimationFrame(() => { toast.classList.add('show'); });
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => { if (toast.parentNode === toastContainer) { toastContainer.removeChild(toast);}}, 300);
+            }, duration);
+        }
+
+        function saveDataToLocalStorage(data, fileNames, colIndices) {
+            console.log("[LS] Saving data. Files:", fileNames.join(', '), "Total Rows:", data.length);
+            try {
+                localStorage.setItem(LS_DATA_KEY, JSON.stringify(data));
+                localStorage.setItem(LS_FILENAME_KEY, JSON.stringify(fileNames));
+                localStorage.setItem(LS_COL_INDICES_KEY, JSON.stringify(colIndices));
+                showToast("Dữ liệu đã được lưu vào bộ nhớ cục bộ.", "success");
+            } catch (e) {
+                console.error("[LS] Error saving to localStorage:", e);
+                let detailedMessage = "Lỗi: Không thể lưu dữ liệu vào bộ nhớ cục bộ.";
+                if (e.name === 'QuotaExceededError' || (e.message && e.message.toLowerCase().includes('quota'))) {
+                    detailedMessage = "Lỗi: Dữ liệu quá lớn để lưu cục bộ. Bạn vẫn có thể sử dụng trong phiên này, nhưng sẽ không được lưu lại cho lần sau.";
+                } else {
+                    detailedMessage += " Vui lòng thử lại hoặc xóa bớt dữ liệu cũ của các trang khác.";
+                }
+                showToast(detailedMessage, "warning", 7000);
+            }
+        }
+
+        function loadDataFromLocalStorage() {
+            console.log("[LS] Loading data from localStorage.");
+            const storedDataJSON = localStorage.getItem(LS_DATA_KEY);
+            const storedFileNamesJSON = localStorage.getItem(LS_FILENAME_KEY);
+            const storedColIndicesJSON = localStorage.getItem(LS_COL_INDICES_KEY);
+
+            if (storedDataJSON && storedFileNamesJSON && storedColIndicesJSON) {
+                try {
+                    const parsedData = JSON.parse(storedDataJSON);
+                    originalData = parsedData.map(row => ({
+                        ...row, TIME: row.TIME ? moment(row.TIME).toDate() : null
+                    }));
+                    columnIndices = JSON.parse(storedColIndicesJSON);
+                    const fileNames = JSON.parse(storedFileNamesJSON);
+                    
+                    if (originalData.length === 0 && parsedData.length > 0) {
+                        console.warn("[LS] Data parsed but resulted in 0 valid originalData items.");
+                    }
+
+                    fileStatus.textContent = `Đã có dữ liệu từ lần trước: ${fileNames.join(', ')} (${originalData.length} dòng). Nhấn "Áp dụng" để xem.`;
+                    searchButton.disabled = false;
+                    fileUploadContainer.classList.add('hidden');
+                    changeFileButton.classList.remove('hidden');
+                    showToast("Đã tìm thấy dữ liệu từ phiên làm việc trước. Nhấn 'Áp dụng' để hiển thị.", "info", 5000);
+                    console.log("[LS] Load successful, ready for user action.");
+                    return true;
+                } catch (e) {console.error("[LS] Error loading from localStorage:", e); clearDataFromLocalStorage(); return false;}
+            }
+            console.log("[LS] No data found in localStorage.");
+            return false;
+        }
+
+        function clearDataFromLocalStorage() {
+            console.log("[LS] Clearing data from localStorage.");
+            localStorage.removeItem(LS_DATA_KEY);
+            localStorage.removeItem(LS_FILENAME_KEY);
+            localStorage.removeItem(LS_COL_INDICES_KEY);
+        }
+
+        let processingShouldStop = false; 
+
+        csvFileInput.addEventListener('change', (event) => {
+            const files = event.target.files;
+            if (!files || files.length === 0) return;
+
+            clearDataFromLocalStorage(); 
+            resetApplicationState(false); 
+            originalData = []; 
+            columnIndices = {}; 
+            processingShouldStop = false; 
+
+            loadingIndicator.classList.remove('hidden');
+            fileStatus.textContent = `Đang chuẩn bị xử lý ${files.length} tệp...`;
+            processingProgress.textContent = '';
+
+            let filesProcessed = 0;
+            let firstFile = true;
+            const allFileNames = Array.from(files).map(f => f.name);
+            let tempParsedData = []; 
+
+            Array.from(files).forEach((file, index) => {
+                if (processingShouldStop) { 
+                    filesProcessed++; 
+                     if (filesProcessed === files.length) { 
+                        handleAllFilesProcessed(tempParsedData, allFileNames, files.length);
+                    }
+                    return;
+                }
+
+                let rowCountInFile = 0;
+                Papa.parse(file, {
+                    worker: false, 
+                    header: false, 
+                    skipEmptyLines: true,
+                    step: function(results, parser) {
+                        if (processingShouldStop) { 
+                            parser.abort(); 
+                            return;
+                        }
+                        rowCountInFile++;
+                        processingProgress.textContent = `Đang xử lý tệp ${index + 1}/${files.length}: ${file.name} (dòng ${rowCountInFile})...`;
+                        if (results.errors.length > 0) {
+                            console.warn(`Lỗi ở dòng ${rowCountInFile}, tệp ${file.name}:`, results.errors);
+                            showToast(`Lỗi ở dòng ${rowCountInFile}, tệp ${file.name}. Bỏ qua dòng này.`, "warning", 5000);
+                            return; 
+                        }
+                        
+                        const rowData = results.data;
+
+                        if (firstFile && rowCountInFile === 1) { 
+                            const rawHeaders = rowData.map(h => String(h).toLowerCase().trim());
+                            columnIndices = mapColumnHeaders(rawHeaders);
+                            if (columnIndices.PHONE === -1) {
+                                showToast(`Tệp đầu tiên (${file.name}) thiếu cột "Điện thoại". Dừng xử lý tất cả các tệp.`, "error", 7000);
+                                processingShouldStop = true; 
+                                parser.abort(); 
+                                return;
+                            }
+                        } else { 
+                            if (!firstFile && rowCountInFile === 1) {
+                                console.log(`Bỏ qua header của tệp ${file.name}`);
+                                return;
+                            }
+                            if (Object.keys(columnIndices).length === 0 || columnIndices.PHONE === -1) {
+                                console.warn("columnIndices không hợp lệ, không thể xử lý dòng từ tệp:", file.name);
+                                processingShouldStop = true; 
+                                parser.abort();
+                                return;
+                            }
+                            const preparedRow = prepareDataRow(rowData, columnIndices);
+                            if (preparedRow) {
+                                tempParsedData.push(preparedRow);
+                            }
+                        }
+                    },
+                    complete: function() {
+                        console.log(`Hoàn thành xử lý tệp ${file.name}, ${rowCountInFile} dòng.`);
+                        if (firstFile) firstFile = false;
+                        filesProcessed++;
+                        if (filesProcessed === files.length) {
+                           handleAllFilesProcessed(tempParsedData, allFileNames, files.length);
+                        }
+                    },
+                    error: function(error, file) {
+                        console.error(`Lỗi khi parse tệp ${file.name}:`, error);
+                        showToast(`Lỗi nghiêm trọng khi parse tệp ${file.name}.`, "error");
+                        processingShouldStop = true; 
+                        filesProcessed++; 
+                        if (filesProcessed === files.length) {
+                           handleAllFilesProcessed(tempParsedData, allFileNames, files.length);
+                        }
+                    }
+                });
+            });
+        });
+
+        function handleAllFilesProcessed(parsedData, fileNames, totalFilesAttempted) {
+            loadingIndicator.classList.add('hidden');
+            processingProgress.textContent = '';
+            
+            if (processingShouldStop || (Object.keys(columnIndices).length === 0 || columnIndices.PHONE === -1) ) {
+                originalData = [];
+                fileStatus.textContent = "Xử lý tệp thất bại do lỗi cấu trúc cột ở tệp đầu tiên hoặc lỗi nghiêm trọng.";
+                searchButton.disabled = true;
+                clearDataFromLocalStorage(); 
+                resetUIAfterNoData(); 
+                return;
+            }
+
+            originalData = parsedData;
+
+            if (originalData.length === 0) {
+                fileStatus.textContent = `Đã xử lý ${totalFilesAttempted} tệp, nhưng không có dữ liệu hợp lệ.`;
+                showToast('Không có dữ liệu hợp lệ sau khi xử lý các tệp.', 'warning');
+                searchButton.disabled = true;
+                resetUIAfterNoData();
+                return;
+            }
+            
+            saveDataToLocalStorage(originalData, fileNames, columnIndices);
+            fileStatus.textContent = `Đã xử lý ${totalFilesAttempted} tệp (${originalData.length} dòng). Nhấn "Áp dụng" để xem.`;
+            searchButton.disabled = false;
+            fileUploadContainer.classList.add('hidden');
+            changeFileButton.classList.remove('hidden');
+            showToast(`Đã xử lý ${totalFilesAttempted} tệp thành công! Nhấn "Áp dụng" để xem.`, "success", 5000);
+            resetUIAfterNoData(); 
+            resultsTableBody.innerHTML = `<tr><td colspan="5" class="text-center p-4">Dữ liệu đã sẵn sàng. Nhấn "Áp dụng Tìm kiếm & Lọc" để hiển thị.</td></tr>`;
+
+        }
+        
+        changeFileButton.addEventListener('click', () => { 
+            clearDataFromLocalStorage(); originalData = []; columnIndices = {}; csvFileInput.value = ''; 
+            fileUploadContainer.classList.remove('hidden'); changeFileButton.classList.add('hidden');
+            resetApplicationState(true); fileStatus.textContent = 'Chưa chọn tệp nào.'; searchButton.disabled = true;
+        });
+
+        function mapColumnHeaders(rawHeaders) { 
+            const indices = {};
+            for (const key in COLUMN_MAPPINGS) indices[key] = findHeaderIndex(rawHeaders, COLUMN_MAPPINGS[key]);
+            return indices;
+        }
+        function findHeaderIndex(headers, possibleNames) { 
+            for (const name of possibleNames) { const index = headers.indexOf(name); if (index !== -1) return index; } return -1;
+        }
+        function parseDate(dateString) { 
+            if (!dateString) return null;
+            const formats = [ "DD/MM/YYYY HH:mm:ss", "DD/MM/YYYY HH:mm", "DD/MM/YYYY", "D/M/YYYY HH:mm:ss", "D/M/YYYY HH:mm", "D/M/YYYY", "YYYY-MM-DD HH:mm:ss", "YYYY-MM-DD HH:mm", "YYYY-MM-DD", moment.ISO_8601 ];
+            for (const format of formats) { const mDate = moment(dateString, format, true); if (mDate.isValid()) return mDate.toDate(); }
+            const genericDate = new Date(dateString); if (!isNaN(genericDate.getTime())) return genericDate; return null; 
+        }
+        function prepareDataRow(row, indices) { 
+            const dateValue = indices.TIME !== -1 ? row[indices.TIME] : null;
+            const parsedDate = parseDate(dateValue);
+            let rawAmount = 0;
+            if (indices.AMOUNT !== -1 && row[indices.AMOUNT]) {
+                const amountStr = String(row[indices.AMOUNT]).replace(/[^0-9.,-]+/g, '').replace(/,/g, '.');
+                const parts = amountStr.split('.');
+                if (parts.length > 2) rawAmount = parseFloat(parts.slice(0, -1).join('') + '.' + parts[parts.length - 1]);
+                else rawAmount = parseFloat(amountStr);
+                if (isNaN(rawAmount)) rawAmount = 0;
+            }
+            return { PHONE: indices.PHONE !== -1 ? String(row[indices.PHONE]).trim() : 'N/A', TIME_ORIGINAL: dateValue, TIME: parsedDate, SALESPERSON: indices.SALESPERSON !== -1 ? row[indices.SALESPERSON] : 'N/A', CHANNEL: indices.CHANNEL !== -1 ? row[indices.CHANNEL] : 'N/A', PRODUCT: indices.PRODUCT !== -1 ? row[indices.PRODUCT] : 'N/A', AMOUNT_FORMATTED: formatCurrency(rawAmount), AMOUNT_RAW: rawAmount };
+        }
+        
+        searchButton.addEventListener('click', () => { currentPage = 1; applyFiltersAndSearch(); });
+        resetButton.addEventListener('click', () => { 
+            phoneNumberInput.value = ''; startDateInput.value = ''; endDateInput.value = '';
+            currentSort = { key: null, direction: 'asc' }; updateSortIcons(); currentPage = 1;
+            if (originalData.length > 0) {
+                displayedData = [...originalData]; 
+                applySort(); 
+                renderPage(); 
+                updateSummary(displayedData); 
+                if (displayedData.length > 0) {
+                    paginationControls.classList.remove('hidden');
+                    exportCsvButton.classList.remove('hidden');
+                } else {
+                     resetUIAfterNoData(); 
+                }
+            } else { 
+                resetUIAfterNoData(); 
+            }
+        });
+        
+        function resetUIAfterNoData(){
+            resultsTableBody.innerHTML = `<tr><td colspan="5" class="text-center p-4">Không có dữ liệu.</td></tr>`;
+            summarySection.classList.add('hidden'); exportCsvButton.classList.add('hidden');
+            paginationControls.classList.add('hidden');
+        }
+
+        function applyFiltersAndSearch() {
+            if (originalData.length === 0 && !localStorage.getItem(LS_DATA_KEY)) { 
+                showToast('Vui lòng tải tệp CSV có dữ liệu trước.', 'warning'); 
+                resetUIAfterNoData();
+                return;
+            }
+             if (originalData.length === 0 && localStorage.getItem(LS_DATA_KEY)) {
+                console.log("[Filter] applyFiltersAndSearch called but originalData is empty, possibly after failed LS rehydration."); 
+                showToast('Lỗi tải dữ liệu từ bộ nhớ. Vui lòng tải lại tệp CSV.', 'error');
+                resetUIAfterNoData();
+                return;
+            }
+
+            loadingIndicator.classList.remove('hidden');
+            
+            setTimeout(() => {
+                const phoneQuery = phoneNumberInput.value.trim().replace(/[\s.-]/g, '');
+                const startDateVal = startDateInput.value ? moment(startDateInput.value).startOf('day').toDate() : null;
+                const endDateVal = endDateInput.value ? moment(endDateInput.value).endOf('day').toDate() : null;
+                
+                let filtered = originalData;
+                if (phoneQuery) filtered = filtered.filter(row => row.PHONE.replace(/[\s.-]/g, '') === phoneQuery);
+                if (startDateVal) filtered = filtered.filter(row => row.TIME && row.TIME >= startDateVal);
+                if (endDateVal) filtered = filtered.filter(row => row.TIME && row.TIME <= endDateVal);
+                
+                displayedData = [...filtered]; 
+                applySort(); 
+                renderPage(); 
+                updateSummary(displayedData); 
+
+                loadingIndicator.classList.add('hidden');
+                if (displayedData.length === 0) {
+                    showToast('Không tìm thấy kết quả phù hợp với tiêu chí.', 'info');
+                    exportCsvButton.classList.add('hidden');
+                    paginationControls.classList.add('hidden');
+                    resultsTableBody.innerHTML = `<tr><td colspan="5" class="text-center p-4">Không tìm thấy kết quả.</td></tr>`;
+                    if (phoneQuery) summarySection.classList.remove('hidden'); else summarySection.classList.add('hidden');
+                } else {
+                    exportCsvButton.classList.remove('hidden');
+                    paginationControls.classList.remove('hidden');
+                    if (phoneQuery) summarySection.classList.remove('hidden'); else summarySection.classList.add('hidden');
+                }
+            }, 100);
+        }
+        
+        function renderPage() {
+            resultsTableBody.innerHTML = '';
+            if(displayedData.length === 0) {
+                renderTable([]); 
+                updatePaginationControls(); 
+                return;
+            }
+
+            rowsPerPage = parseInt(rowsPerPageSelect.value) || 25;
+            const totalItems = displayedData.length;
+            const totalPages = Math.ceil(totalItems / rowsPerPage) || 1;
+            currentPage = Math.max(1, Math.min(currentPage, totalPages)); 
+
+            const startIndex = (currentPage - 1) * rowsPerPage;
+            const endIndex = startIndex + rowsPerPage;
+            const pageData = displayedData.slice(startIndex, endIndex);
+            
+            renderTable(pageData);
+            updatePaginationControls();
+        }
+
+        function renderTable(dataToRender) { 
+            resultsTableBody.innerHTML = ''; 
+            if(dataToRender.length === 0 && displayedData.length > 0){ 
+                 resultsTableBody.innerHTML = `<tr><td colspan="5" class="text-center p-4">Không có dữ liệu cho trang này.</td></tr>`;
+                 return;
+            }
+            if(dataToRender.length === 0 && displayedData.length === 0){ // Bao gồm cả trường hợp originalData rỗng
+                 resultsTableBody.innerHTML = `<tr><td colspan="5" class="text-center p-4">Không có dữ liệu.</td></tr>`;
+                 return;
+            }
+
+            dataToRender.forEach(row => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="whitespace-nowrap text-gray-700">${row.TIME ? moment(row.TIME).format('DD/MM/YY HH:mm') : (row.TIME_ORIGINAL || 'N/A')}</td>
+                    <td class="whitespace-nowrap text-gray-700">${row.SALESPERSON}</td>
+                    <td class="whitespace-nowrap text-gray-700">${row.CHANNEL}</td>
+                    <td class="text-gray-700 whitespace-normal break-words">${row.PRODUCT}</td>
+                    <td class="whitespace-nowrap text-gray-700 text-right">${row.AMOUNT_FORMATTED}</td>
+                `;
+                resultsTableBody.appendChild(tr);
+            });
+        }
+
+        function updatePaginationControls() {
+            if(displayedData.length === 0) {
+                paginationControls.classList.add('hidden');
+                return;
+            }
+            paginationControls.classList.remove('hidden');
+
+            rowsPerPage = parseInt(rowsPerPageSelect.value) || 25;
+            const totalItems = displayedData.length;
+            const totalPages = Math.ceil(totalItems / rowsPerPage) || 1; 
+            
+            pageInfo.textContent = `Trang ${currentPage} / ${totalPages}`;
+            prevPageButton.disabled = currentPage === 1;
+            nextPageButton.disabled = currentPage === totalPages;
+        }
+
+        prevPageButton.addEventListener('click', () => { if (currentPage > 1) { currentPage--; renderPage(); } });
+        nextPageButton.addEventListener('click', () => { 
+            const totalPages = Math.ceil(displayedData.length / (parseInt(rowsPerPageSelect.value) || 25));
+            if (currentPage < totalPages) { currentPage++; renderPage(); } 
+        });
+        rowsPerPageSelect.addEventListener('change', () => { currentPage = 1; renderPage(); });
+        
+        function updateSummary(dataForSummary) { 
+            if (phoneNumberInput.value.trim() === '') { summarySection.classList.add('hidden'); return; }
+            const totalOrders = dataForSummary.length; 
+            const totalAmount = dataForSummary.reduce((sum, row) => sum + row.AMOUNT_RAW, 0);
+            totalOrdersEl.textContent = totalOrders;
+            totalAmountEl.textContent = formatCurrency(totalAmount);
+            summarySection.classList.remove('hidden');
+        }
+
+        document.querySelectorAll('.sortable-header').forEach(header => { 
+            header.addEventListener('click', () => {
+                const sortKey = header.dataset.sortKey;
+                if (currentSort.key === sortKey) currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+                else { currentSort.key = sortKey; currentSort.direction = 'asc';}
+                updateSortIcons();
+                if (originalData.length > 0) { 
+                    currentPage = 1; 
+                    applySort(); 
+                    renderPage(); 
+                }
+            });
+        });
+        function applySort() { 
+            if (!currentSort.key || displayedData.length === 0) return;
+            displayedData.sort((a, b) => { 
+                let valA = a[currentSort.key]; let valB = b[currentSort.key];
+                if (currentSort.key === 'TIME') { valA = valA ? valA.getTime() : 0; valB = valB ? valB.getTime() : 0; }
+                let comparison = 0;
+                if (valA > valB) comparison = 1; else if (valA < valB) comparison = -1;
+                return currentSort.direction === 'asc' ? comparison : comparison * -1;
+            });
+        }
+        function updateSortIcons() { 
+             document.querySelectorAll('.sortable-header').forEach(header => {
+                header.classList.remove('asc', 'desc');
+                if (header.dataset.sortKey === currentSort.key) header.classList.add(currentSort.direction);
+            });
+        }
+        function formatCurrency(number) { 
+            return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(number || 0);
+        }
+        function resetApplicationState(fullReset) { 
+            phoneNumberInput.value = ''; startDateInput.value = ''; endDateInput.value = '';
+            resultsTableBody.innerHTML = '';
+            summarySection.classList.add('hidden'); exportCsvButton.classList.add('hidden');
+            paginationControls.classList.add('hidden'); 
+            currentSort = { key: null, direction: 'asc' }; updateSortIcons(); 
+            displayedData = []; currentPage = 1;
+
+            if (fullReset) {
+                originalData = []; columnIndices = {}; csvFileInput.value = ''; 
+                fileStatus.textContent = 'Chưa chọn tệp nào.'; searchButton.disabled = true;
+                fileUploadContainer.classList.remove('hidden'); changeFileButton.classList.add('hidden');
+                processingProgress.textContent = '';
+            } else if (originalData.length === 0) { 
+                searchButton.disabled = true;
+                fileUploadContainer.classList.remove('hidden'); changeFileButton.classList.add('hidden');
+                 processingProgress.textContent = '';
+            } else { 
+                searchButton.disabled = false;
+                fileUploadContainer.classList.add('hidden'); changeFileButton.classList.remove('hidden');
+            }
+             // Xóa bảng khi reset dù có fullReset hay không, sau đó có thể hiển thị thông báo "Dữ liệu sẵn sàng..."
+            if(!fullReset && originalData.length > 0) {
+                 resultsTableBody.innerHTML = `<tr><td colspan="5" class="text-center p-4">Dữ liệu đã sẵn sàng. Nhấn "Áp dụng Tìm kiếm & Lọc" để hiển thị.</td></tr>`;
+            } else if (fullReset || originalData.length === 0) {
+                 resultsTableBody.innerHTML = `<tr><td colspan="5" class="text-center p-4">Chưa có dữ liệu. Vui lòng tải tệp.</td></tr>`;
+            }
+        }
+        
+        exportCsvButton.addEventListener('click', () => {
+            if (displayedData.length === 0 || resultsTableBody.children.length === 0 || (resultsTableBody.children.length === 1 && resultsTableBody.children[0].children[0].textContent.includes("Không có dữ liệu"))) {
+                showToast('Không có dữ liệu để xuất.', 'warning'); return;
+            }
+            
+            const rowsPerPageVal = parseInt(rowsPerPageSelect.value) || 25;
+            const startIndex = (currentPage - 1) * rowsPerPageVal;
+            const endIndex = startIndex + rowsPerPageVal;
+            const pageDataToExport = displayedData.slice(startIndex, endIndex);
+
+            if(pageDataToExport.length === 0){
+                showToast('Không có dữ liệu ở trang hiện tại để xuất.', 'warning'); return;
+            }
+
+            const headers = ["Thời gian", "Người bán", "Kênh bán", "Tên sản phẩm", "Thành tiền"];
+            const rows = pageDataToExport.map(row => [
+                row.TIME ? moment(row.TIME).format('DD/MM/YYYY HH:mm:ss') : (row.TIME_ORIGINAL || ''),
+                row.SALESPERSON, row.CHANNEL, row.PRODUCT, row.AMOUNT_RAW 
+            ]);
+            let csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n"
+                + rows.map(e => e.map(cell => `"${String(cell || '').replace(/"/g, '""')}"`).join(",")).join("\n");
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            const timestamp = moment().format('YYYYMMDD_HHmmss');
+            link.setAttribute("download", `lich_su_mua_hang_trang_${currentPage}_${timestamp}.csv`);
+            document.body.appendChild(link); link.click(); document.body.removeChild(link);
+            showToast("Đã xuất dữ liệu trang hiện tại thành công!", "success");
+        });
+
+        console.log("[INIT] Initializing application...");
+        if (!loadDataFromLocalStorage()) { 
+            console.log("[INIT] No data from localStorage. Resetting.");
+            resetApplicationState(true); 
+        } else {
+            console.log("[INIT] Data loaded from localStorage. Ready for user action.");
+            //  Hiển thị thông báo trong bảng thay vì tự động lọc
+            resultsTableBody.innerHTML = `<tr><td colspan="5" class="text-center p-4">Dữ liệu từ phiên trước đã sẵn sàng. Nhấn "Áp dụng Tìm kiếm & Lọc" để hiển thị.</td></tr>`;
+            paginationControls.classList.add('hidden'); 
+        }
+    </script>
+</body>
+</html>
